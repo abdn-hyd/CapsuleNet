@@ -41,6 +41,27 @@ class ConvLayer(nn.Module):
         return self.relu(self.conv(x))
 
 
+class Squash(nn.Module):
+    def __init__(
+        self,
+        eps: float = 1e-5,
+    ):
+        super(Squash, self).__init__()
+        self.eps = eps
+
+    def forward(
+        self,
+        x: torch.Tensor,
+    ):
+        """
+        squashing function can shunk short tensor to almost zero and long tensor can be slightly below 1
+        """
+        squared_norm = (x**2).sum(dim=-1, keepdim=True)
+        scale = squared_norm / (1 + squared_norm)
+        out = scale * x / (torch.sqrt(squared_norm) + self.eps)
+        return out
+
+
 # default config for mnist datatset
 class PrimaryCaps(nn.Module):
     def __init__(
@@ -73,6 +94,7 @@ class PrimaryCaps(nn.Module):
                 for _ in range(capsule_dim)
             ]
         )
+        self.sqush = Squash()
 
     def forward(
         self,
@@ -86,19 +108,6 @@ class PrimaryCaps(nn.Module):
         u = torch.stack(u, dim=1)  # shape: b x 8 x 32 x 6 x 6
         u = u.view(x.shape[0], self.num_capsules, -1)  # shape: b x (32 x 6 x 6) x 8
         return self.squash(u)
-
-    def squash(
-        self,
-        x: torch.Tensor,
-        eps: float = 1e-5,
-    ):
-        """
-        squashing function can shunk short tensor to almost zero and long tensor can be slightly below 1
-        """
-        squared_norm = (x**2).sum(dim=-1, keepdim=True)
-        scale = squared_norm / (1 + squared_norm)
-        out = scale * x / (torch.sqrt(squared_norm) + eps)
-        return out
 
 
 class DigitCap(nn.Module):
@@ -125,6 +134,7 @@ class DigitCap(nn.Module):
         self.W = nn.Parameter(
             torch.randn(1, num_routes, num_capsules, capsule_out_dim, capsule_in_dim)
         )
+        self.squash = Squash()
 
     def forward(
         self,
@@ -193,16 +203,6 @@ class DigitCap(nn.Module):
                 b_ij = b_ij + a_ij.squeeze(-1).mean(dim=0, keepdim=True)
 
         return v_j
-
-    def squash(
-        self,
-        x: torch.Tensor,
-        eps: float = 1e-5,
-    ):
-        squared_norm = (x**2).sum(dim=-1, keepdim=True)
-        scale = squared_norm / (1 + squared_norm)
-        out = scale * x / (torch.sqrt(squared_norm) + eps)
-        return out
 
 
 class CapsNet(nn.Module):
