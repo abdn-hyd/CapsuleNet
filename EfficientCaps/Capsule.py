@@ -36,9 +36,9 @@ class ConvLayer(nn.Module):
         ],
     ):
         super(ConvLayer, self).__init__()
-        module_list = []
+        modules_list = []
         for cfg in Conv_Cfg:
-            module_list.append(
+            modules_list.append(
                 nn.Conv2d(
                     in_channels=cfg[0],
                     out_channels=cfg[1],
@@ -46,10 +46,10 @@ class ConvLayer(nn.Module):
                     stride=cfg[3],
                 )
             )
-            module_list.append(nn.BatchNorm2d(num_features=cfg[1]))
-            module_list.append(nn.ReLU())
+            modules_list.append(nn.BatchNorm2d(num_features=cfg[1]))
+            modules_list.append(nn.ReLU())
 
-        self.conv_layers = nn.Sequential(*module_list)
+        self.conv_layers = nn.Sequential(*modules_list)
 
     def init_params(
         self,
