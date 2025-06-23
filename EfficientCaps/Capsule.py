@@ -102,8 +102,8 @@ class PrimaryCaps(nn.Module):
 class RoutingCaps(nn.Module):
     def __init__(
         self,
-        in_capsules: tuple[int] = (16, 8),
-        out_capsules: tuple[int] = (10, 16),
+        in_capsules: List[int] = [16, 8],
+        out_capsules: List[int] = [10, 16],
     ):
         """
         Args:
@@ -111,8 +111,8 @@ class RoutingCaps(nn.Module):
             out_capsules: (Number of Capsules, Capsule Dimension),
         """
         super(RoutingCaps, self).__init__()
-        self.N0, self.D0 = in_capsules
-        self.N1, self.D1 = out_capsules
+        self.N0, self.D0 = in_capsules[0], in_capsules[1]
+        self.N1, self.D1 = out_capsules[0], out_capsules[1]
         self.squash = Squash()
 
         # initialize the routing parameters
@@ -140,14 +140,41 @@ class RoutingCaps(nn.Module):
         return S
 
 
+# fefault config for Mnist
 class EfficientCaps(nn.Module):
     def __init__(
         self,
+        Conv_Cfg: List[List[int]] = [
+            [1, 32, 5, 1],
+            [32, 64, 3, 1],
+            [64, 64, 3, 1],
+            [64, 128, 3, 2],
+        ],
+        # config of primary capsule layer
+        in_channels: int = 128,
+        kernel_size: int = 9,
+        num_capsules: int = 16,
+        capsule_dim: int = 8,
+        stride: int = 1,
+        #  config of routing capsule layer
+        in_capsules: List[int] = [16, 8],
+        out_capsules: List[int] = [10, 16],
     ):
         super(EfficientCaps, self).__init__()
-        self.convLayer = ConvLayer()
-        self.primaryCaps = PrimaryCaps()
-        self.routingCaps = RoutingCaps()
+        self.convLayer = ConvLayer(
+            Conv_Cfg=Conv_Cfg,
+        )
+        self.primaryCaps = PrimaryCaps(
+            in_channels=in_channels,
+            kernel_size=kernel_size,
+            num_capsules=num_capsules,
+            capsule_dim=capsule_dim,
+            stride=stride,
+        )
+        self.routingCaps = RoutingCaps(
+            in_capsules=in_capsules,
+            out_capsules=out_capsules,
+        )
 
     def forward(
         self,

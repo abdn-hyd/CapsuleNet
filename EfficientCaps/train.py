@@ -2,21 +2,25 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 from pathlib import Path
-from Dataset import get_mnist_dataloader
+from Dataset import get_mnist_dataloader, get_cifar10_dataloader
 from Capsule import EfficientCaps
 from Config import (
     Mnist_Train_Loader_Cfg,
     Mnist_Test_Loader_Cfg,
     Mnist_Training_Cfg,
+    Cifar10_Model_Cfg,
+    Cifar10_Train_Loader_Cfg,
+    Cifar10_Test_Loader_Cfg,
+    Cifar10_Training_Cfg,
 )
 from torchsummary import summary
+from dataclasses import dataclass
 
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def Mnist_Train():
-
     # prepare the dataloder
     train_data_Cfg = Mnist_Train_Loader_Cfg()
     train_loader = get_mnist_dataloader(train_data_Cfg)
@@ -37,6 +41,56 @@ def Mnist_Train():
 
     # summary the model
     summary(model, input_size=(1, 28, 28))
+
+    Train(train_loader, test_loader, model, train_Cfg, optimizer, lr_scheduler)
+
+
+def Cifar10_Train():
+    # prepare the dataloder
+    train_data_Cfg = Cifar10_Train_Loader_Cfg()
+    train_loader = get_cifar10_dataloader(train_data_Cfg)
+    test_data_Cfg = Cifar10_Test_Loader_Cfg()
+    test_loader = get_cifar10_dataloader(test_data_Cfg)
+
+    # load the model config
+    Model_Cfg = Cifar10_Model_Cfg()
+    model = EfficientCaps(
+        Conv_Cfg=Model_Cfg.Conv_Cfg,
+        in_channels=Model_Cfg.in_channels,
+        kernel_size=Model_Cfg.kernel_size,
+        num_capsules=Model_Cfg.num_capsules,
+        capsule_dim=Model_Cfg.capsule_dim,
+        stride=Model_Cfg.stride,
+        in_capsules=Model_Cfg.in_capsules,
+        out_capsules=Model_Cfg.out_capsules,
+    ).to(DEVICE)
+
+    # setting other hyperparameters
+    train_Cfg = Cifar10_Training_Cfg()
+    optimizer = torch.optim.Adam(
+        model.parameters(), lr=train_Cfg.lr, betas=(train_Cfg.beta1, train_Cfg.beta2)
+    )
+    # lr_scheduler = torch.optim.lr_scheduler.StepLR(
+    #     optimizer, step_size=train_Cfg.step_size, gamma=train_Cfg.gamma
+    # )
+    lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
+        optimizer, gamma=train_Cfg.gamma, last_epoch=-1
+    )
+
+    # summary the model
+    summary(model, input_size=(3, 32, 32))
+
+    Train(train_loader, test_loader, model, train_Cfg, optimizer, lr_scheduler)
+
+
+def Train(
+    train_loader: torch.utils.data.DataLoader,
+    test_loader: torch.utils.data.DataLoader,
+    model: nn.Module,
+    train_Cfg: dataclass,
+    optimizer: torch.optim.Optimizer,
+    lr_scheduler: torch.optim.lr_scheduler._LRScheduler,
+):
 
     # check whether we have resume to reload the model
     if train_Cfg.resume:
@@ -63,7 +117,7 @@ def Mnist_Train():
             train_loader=train_loader,
             optimizer=optimizer,
             lr_scheduler=lr_scheduler,
-            num_classes=10,
+            num_classes=train_Cfg.num_classes,
             progress_bar=progress_bar,
             global_step=global_step,
         )
@@ -122,6 +176,8 @@ def train(
         out = model(imgs)
         loss = model.MarginalLoss(out, labels)
         loss.backward()
+        # clip the gradient to stabllize the training process
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
         train_loss += (loss.detach().item() - train_loss) / (step + 1)
 
@@ -191,4 +247,5 @@ def test(
 
 
 if __name__ == "__main__":
-    Mnist_Train()
+    # Mnist_Train()
+    Cifar10_Train()
