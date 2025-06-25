@@ -49,12 +49,7 @@ class Squash(nn.Module):
 class ConvLayer(nn.Module):
     def __init__(
         self,
-        Conv_Cfg: List[List[int]] = [
-            [1, 32, 5, 1],
-            [32, 64, 3, 1],
-            [64, 64, 3, 1],
-            [64, 128, 3, 2],
-        ],
+        Conv_Cfg: List[List[int]],
     ):
         super(ConvLayer, self).__init__()
         modules_list = []
@@ -65,6 +60,7 @@ class ConvLayer(nn.Module):
                     out_channels=cfg[1],
                     kernel_size=cfg[2],
                     stride=cfg[3],
+                    padding=cfg[4],
                 )
             )
             modules_list.append(nn.BatchNorm2d(num_features=cfg[1]))
@@ -87,35 +83,48 @@ class ConvLayer(nn.Module):
         return out
 
 
-class PrimaryCaps(nn.Module):
+class PatchifyCaps(nn.Module):
     def __init__(
         self,
-        in_channels: int = 128,
-        kernel_size: int = 9,
-        num_capsules: int = 16,
-        capsule_dim: int = 8,
-        stride: int = 1,
+        in_channels: int,
+        kernel_size: int,
+        num_patches: int,
+        capsule_dim: int,
+        stride: int,
     ):
-        super(PrimaryCaps, self).__init__()
+        super(PatchifyCaps, self).__init__()
         self.in_channels = in_channels
-        self.num_capsules = num_capsules
+        self.num_patches = num_patches
         self.capsule_dim = capsule_dim
+        self.num_patches_h = self.num_patches**0.5
+        self.num_patches_w = self.num_patches**0.5
+
         # kernel_size == H, W, the final output shape be 1 x 1
         self.dw_conv2d = nn.Conv2d(
-            in_channels=in_channels,
-            out_channels=self.num_capsules * self.capsule_dim,
+            in_channels=self.num_patches * in_channels,
+            out_channels=self.num_patches * in_channels,
             kernel_size=kernel_size,
             stride=stride,
-            groups=in_channels,
+            groups=self.num_patches * in_channels,
         )
+        self.ln = nn.Linear(in_channels, self.capsule_dim)
         self.squash = Squash()
 
     def forward(
         self,
         x: torch.Tensor,
     ):
-        out = self.dw_conv2d(x)
-        out = out.view(-1, self.num_capsules, self.capsule_dim)
+        # patchify the images
+        B, C, H, W = x.shape
+        patchify_x = x.view(
+            B,
+            self.num_patches * C,
+            int(H / self.num_patches_h),
+            int(W / self.num_patches_w),
+        )
+        out = self.dw_conv2d(patchify_x)
+        out = out.view(B, self.num_patches, self.in_channels)
+        out = self.ln(out)
         return out
 
 
@@ -123,8 +132,8 @@ class PrimaryCaps(nn.Module):
 class RoutingCaps(nn.Module):
     def __init__(
         self,
-        in_capsules: List[int] = [16, 8],
-        out_capsules: List[int] = [10, 16],
+        in_capsules: List[int],
+        out_capsules: List[int],
     ):
         """
         Args:
@@ -161,48 +170,57 @@ class RoutingCaps(nn.Module):
         return S
 
 
-# fefault config for Mnist
-class EfficientCaps(nn.Module):
+class PG_Caps(nn.Module):
     def __init__(
         self,
-        Conv_Cfg: List[List[int]] = [
-            [1, 32, 5, 1],
-            [32, 64, 3, 1],
-            [64, 64, 3, 1],
-            [64, 128, 3, 2],
+        Conv_Cfgs: List[List[List[int]]] = [
+            [
+                [3, 128, 3, 1, 1],
+            ],
+            [
+                [3, 128, 3, 2, 1],
+            ],
+            [
+                [3, 128, 3, 4, 1],
+            ],
         ],
-        # config of primary capsule layer
-        in_channels: int = 128,
-        kernel_size: int = 9,
-        num_capsules: int = 16,
-        capsule_dim: int = 8,
-        stride: int = 1,
-        #  config of routing capsule layer
-        in_capsules: List[int] = [16, 8],
-        out_capsules: List[int] = [10, 16],
+        PCaps_Cfgs: List[List[int]] = [
+            [128, 4, 64, 8, 1],
+            [128, 4, 16, 8, 1],
+            [128, 4, 4, 8, 1],
+        ],
+        RCaps_Cfg: List[List[int]] = [[84, 8], [10, 16]],
     ):
-        super(EfficientCaps, self).__init__()
-        self.convLayer = ConvLayer(
-            Conv_Cfg=Conv_Cfg,
-        )
-        self.primaryCaps = PrimaryCaps(
-            in_channels=in_channels,
-            kernel_size=kernel_size,
-            num_capsules=num_capsules,
-            capsule_dim=capsule_dim,
-            stride=stride,
-        )
+        super(PG_Caps, self).__init__()
+
+        self.Patchify_list = nn.ModuleList()
+        for i in range(len(Conv_Cfgs)):
+            convLayer = ConvLayer(
+                Conv_Cfg=Conv_Cfgs[i],
+            )
+            patchifyCaps = PatchifyCaps(
+                in_channels=PCaps_Cfgs[i][0],
+                kernel_size=PCaps_Cfgs[i][1],
+                num_patches=PCaps_Cfgs[i][2],
+                capsule_dim=PCaps_Cfgs[i][3],
+                stride=PCaps_Cfgs[i][4],
+            )
+            self.Patchify_list.append(nn.Sequential(*[convLayer, patchifyCaps]))
+
         self.routingCaps = RoutingCaps(
-            in_capsules=in_capsules,
-            out_capsules=out_capsules,
+            in_capsules=RCaps_Cfg[0],
+            out_capsules=RCaps_Cfg[1],
         )
 
     def forward(
         self,
         x: torch.Tensor,
     ):
-        out = self.convLayer(x)
-        out = self.primaryCaps(out)
+        outs = []
+        for i in range(len(self.Patchify_list)):
+            outs.append(self.Patchify_list[i](x))
+
+        out = torch.cat(outs, dim=1)
         out = self.routingCaps(out)
         return out
 
@@ -226,10 +244,10 @@ class EfficientCaps(nn.Module):
         Returns:
             torch.Tensor: The calculated marginal loss (scalar).
         """
-        batch_size = x.shape[0]
+        B = x.shape[0]
         v_c = torch.sqrt((x**2).sum(dim=2, keepdim=True))
-        left = F.relu(0.9 - v_c).view(batch_size, -1)
-        right = F.relu(v_c - 0.1).view(batch_size, -1)
+        left = F.relu(0.9 - v_c).view(B, -1)
+        right = F.relu(v_c - 0.1).view(B, -1)
         margin_loss = labels * left + 0.5 * (1.0 - labels) * right
         # we sum the loss for the dim = 1 which is the dimension of classes
         margin_loss = margin_loss.sum(dim=1)
@@ -237,8 +255,8 @@ class EfficientCaps(nn.Module):
 
 
 if __name__ == "__main__":
-    x = torch.randn(2, 1, 28, 28)
-    model = EfficientCaps()
+    x = torch.randn(2, 3, 32, 32)
+    model = PG_Caps()
     with torch.no_grad():
         out = model(x)
         print(out.shape)

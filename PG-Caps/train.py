@@ -2,13 +2,9 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 from pathlib import Path
-from Dataset import get_mnist_dataloader, get_cifar10_dataloader
-from Capsule import EfficientCaps
+from Dataset import get_cifar10_dataloader
+from Capsule import PG_Caps
 from Config import (
-    Mnist_Train_Loader_Cfg,
-    Mnist_Test_Loader_Cfg,
-    Mnist_Training_Cfg,
-    Cifar10_Model_Cfg,
     Cifar10_Train_Loader_Cfg,
     Cifar10_Test_Loader_Cfg,
     Cifar10_Training_Cfg,
@@ -20,31 +16,6 @@ from dataclasses import dataclass
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def Mnist_Train():
-    # prepare the dataloder
-    train_data_Cfg = Mnist_Train_Loader_Cfg()
-    train_loader = get_mnist_dataloader(train_data_Cfg)
-    test_data_Cfg = Mnist_Test_Loader_Cfg()
-    test_loader = get_mnist_dataloader(test_data_Cfg)
-
-    # load the model config
-    model = EfficientCaps().to(DEVICE)
-
-    # setting other hyperparameters
-    train_Cfg = Mnist_Training_Cfg()
-    optimizer = torch.optim.Adam(
-        model.parameters(), lr=train_Cfg.lr, betas=(train_Cfg.beta1, train_Cfg.beta2)
-    )
-    lr_scheduler = torch.optim.lr_scheduler.StepLR(
-        optimizer, step_size=train_Cfg.step_size, gamma=train_Cfg.gamma
-    )
-
-    # summary the model
-    summary(model, input_size=(1, 28, 28))
-
-    Train_Test(train_loader, test_loader, model, train_Cfg, optimizer, lr_scheduler)
-
-
 def Cifar10_Train():
     # prepare the dataloder
     train_data_Cfg = Cifar10_Train_Loader_Cfg()
@@ -53,17 +24,7 @@ def Cifar10_Train():
     test_loader = get_cifar10_dataloader(test_data_Cfg)
 
     # load the model config
-    Model_Cfg = Cifar10_Model_Cfg()
-    model = EfficientCaps(
-        Conv_Cfg=Model_Cfg.Conv_Cfg,
-        in_channels=Model_Cfg.in_channels,
-        kernel_size=Model_Cfg.kernel_size,
-        num_capsules=Model_Cfg.num_capsules,
-        capsule_dim=Model_Cfg.capsule_dim,
-        stride=Model_Cfg.stride,
-        in_capsules=Model_Cfg.in_capsules,
-        out_capsules=Model_Cfg.out_capsules,
-    ).to(DEVICE)
+    model = PG_Caps().to(DEVICE)
 
     # setting other hyperparameters
     train_Cfg = Cifar10_Training_Cfg()
