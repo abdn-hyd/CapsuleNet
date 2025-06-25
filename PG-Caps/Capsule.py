@@ -113,6 +113,7 @@ class PrimaryCaps(nn.Module):
         out = self.conv2d(x)
         B, C, H, W = out.shape
         out = out.view(B, self.out_channels * H * W, self.capsule_dim)
+        out = self.squash(out)
         return out
 
 
