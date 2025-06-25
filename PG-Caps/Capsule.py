@@ -83,48 +83,36 @@ class ConvLayer(nn.Module):
         return out
 
 
-class PatchifyCaps(nn.Module):
+class PrimaryCaps(nn.Module):
     def __init__(
         self,
         in_channels: int,
+        out_channels: int,
         kernel_size: int,
-        num_patches: int,
         capsule_dim: int,
         stride: int,
     ):
-        super(PatchifyCaps, self).__init__()
+        super(PrimaryCaps, self).__init__()
         self.in_channels = in_channels
-        self.num_patches = num_patches
+        self.out_channels = out_channels
         self.capsule_dim = capsule_dim
-        self.num_patches_h = self.num_patches**0.5
-        self.num_patches_w = self.num_patches**0.5
 
         # kernel_size == H, W, the final output shape be 1 x 1
-        self.dw_conv2d = nn.Conv2d(
-            in_channels=self.num_patches * in_channels,
-            out_channels=self.num_patches * in_channels,
+        self.conv2d = nn.Conv2d(
+            in_channels=in_channels,
+            out_channels=out_channels * capsule_dim,
             kernel_size=kernel_size,
             stride=stride,
-            groups=self.num_patches * in_channels,
         )
-        self.ln = nn.Linear(in_channels, self.capsule_dim)
         self.squash = Squash()
 
     def forward(
         self,
         x: torch.Tensor,
     ):
-        # patchify the images
-        B, C, H, W = x.shape
-        patchify_x = x.view(
-            B,
-            self.num_patches * C,
-            int(H / self.num_patches_h),
-            int(W / self.num_patches_w),
-        )
-        out = self.dw_conv2d(patchify_x)
-        out = out.view(B, self.num_patches, self.in_channels)
-        out = self.ln(out)
+        out = self.conv2d(x)
+        B, C, H, W = out.shape
+        out = out.view(B, self.out_channels * H * W, self.capsule_dim)
         return out
 
 
@@ -175,37 +163,40 @@ class PG_Caps(nn.Module):
         self,
         Conv_Cfgs: List[List[List[int]]] = [
             [
-                [3, 128, 3, 1, 1],
+                [3, 64, 3, 1, 1],
+                [64, 128, 3, 1, 1],
             ],
             [
-                [3, 128, 3, 2, 1],
+                [3, 64, 3, 2, 1],
+                [64, 128, 3, 1, 1],
             ],
             [
-                [3, 128, 3, 4, 1],
+                [3, 64, 3, 4, 1],
+                [64, 128, 3, 1, 1],
             ],
         ],
         PCaps_Cfgs: List[List[int]] = [
-            [128, 4, 64, 8, 1],
-            [128, 4, 16, 8, 1],
-            [128, 4, 4, 8, 1],
+            [128, 1, 9, 8, 3],
+            [128, 1, 5, 8, 3],
+            [128, 4, 3, 8, 3],
         ],
-        RCaps_Cfg: List[List[int]] = [[84, 8], [10, 16]],
+        RCaps_Cfg: List[List[int]] = [[96, 8], [10, 16]],
     ):
         super(PG_Caps, self).__init__()
 
-        self.Patchify_list = nn.ModuleList()
+        self.Primary_list = nn.ModuleList()
         for i in range(len(Conv_Cfgs)):
             convLayer = ConvLayer(
                 Conv_Cfg=Conv_Cfgs[i],
             )
-            patchifyCaps = PatchifyCaps(
+            primaryCaps = PrimaryCaps(
                 in_channels=PCaps_Cfgs[i][0],
-                kernel_size=PCaps_Cfgs[i][1],
-                num_patches=PCaps_Cfgs[i][2],
+                out_channels=PCaps_Cfgs[i][1],
+                kernel_size=PCaps_Cfgs[i][2],
                 capsule_dim=PCaps_Cfgs[i][3],
                 stride=PCaps_Cfgs[i][4],
             )
-            self.Patchify_list.append(nn.Sequential(*[convLayer, patchifyCaps]))
+            self.Primary_list.append(nn.Sequential(*[convLayer, primaryCaps]))
 
         self.routingCaps = RoutingCaps(
             in_capsules=RCaps_Cfg[0],
@@ -217,8 +208,8 @@ class PG_Caps(nn.Module):
         x: torch.Tensor,
     ):
         outs = []
-        for i in range(len(self.Patchify_list)):
-            outs.append(self.Patchify_list[i](x))
+        for i in range(len(self.Primary_list)):
+            outs.append(self.Primary_list[i](x))
 
         out = torch.cat(outs, dim=1)
         out = self.routingCaps(out)

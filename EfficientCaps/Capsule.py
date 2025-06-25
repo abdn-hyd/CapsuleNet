@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import List
+from torchsummary import summary
 
 
 # class Squash(nn.Module):
@@ -166,14 +167,14 @@ class EfficientCaps(nn.Module):
     def __init__(
         self,
         Conv_Cfg: List[List[int]] = [
-            [1, 32, 5, 1],
+            [3, 32, 5, 1],
             [32, 64, 3, 1],
             [64, 64, 3, 1],
             [64, 128, 3, 2],
         ],
         # config of primary capsule layer
         in_channels: int = 128,
-        kernel_size: int = 9,
+        kernel_size: int = 11,
         num_capsules: int = 16,
         capsule_dim: int = 8,
         stride: int = 1,
@@ -239,6 +240,7 @@ class EfficientCaps(nn.Module):
 if __name__ == "__main__":
     x = torch.randn(2, 1, 28, 28)
     model = EfficientCaps()
-    with torch.no_grad():
-        out = model(x)
-        print(out.shape)
+    # with torch.no_grad():
+    #   out = model(x)
+    #   print(out.shape)
+    summary(model, input_size=(3, 32, 32))
