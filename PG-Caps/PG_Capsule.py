@@ -4,27 +4,6 @@ import torch.nn.functional as F
 from typing import List
 
 
-# class Squash(nn.Module):
-#     def __init__(
-#         self,
-#         eps: float = 1e-20,
-#     ):
-#         """
-#         A modified squash function which is originated from "Capsule Network on Complex Data"
-#         """
-#         super(Squash, self).__init__()
-#         self.eps = eps
-#
-#     def forward(
-#         self,
-#         x: torch.Tensor,
-#     ):
-#         norm = torch.norm(x, p=2, dim=-1, keepdim=True)
-#         coef = 1 - 1 / (torch.exp(norm) + self.eps)
-#         unit = x / (norm + self.eps)
-#         return coef * unit
-
-
 class Squash(nn.Module):
     def __init__(
         self,
@@ -52,21 +31,22 @@ class ConvLayer(nn.Module):
         Conv_Cfg: List[List[int]],
     ):
         super(ConvLayer, self).__init__()
-        modules_list = []
+        self.modules_list = nn.ModuleList()
         for cfg in Conv_Cfg:
-            modules_list.append(
-                nn.Conv2d(
-                    in_channels=cfg[0],
-                    out_channels=cfg[1],
-                    kernel_size=cfg[2],
-                    stride=cfg[3],
-                    padding=cfg[4],
+            self.modules_list.append(
+                nn.Sequential(
+                    *[
+                        nn.Conv2d(
+                            in_channels=cfg[0],
+                            out_channels=cfg[1],
+                            kernel_size=cfg[2],
+                            stride=cfg[3],
+                            padding=cfg[4],
+                        ),
+                        nn.BatchNorm2d(num_features=cfg[1]),
+                    ]
                 )
             )
-            modules_list.append(nn.BatchNorm2d(num_features=cfg[1]))
-            modules_list.append(nn.ReLU())
-
-        self.conv_layers = nn.Sequential(*modules_list)
 
     def init_params(
         self,
@@ -79,7 +59,16 @@ class ConvLayer(nn.Module):
         self,
         x: torch.Tensor,
     ):
-        out = self.conv_layers(x)
+        out = None
+        for i in range(len(self.modules_list)):
+            if i == 0:
+                out = F.relu(self.modules_list[i](x))
+            else:
+                ori_out = out
+                out = self.modules_list[i](out)
+                if ori_out.shape[1] == out.shape[1]:
+                    out += ori_out
+                out = F.relu((out))
         return out
 
 
@@ -87,33 +76,32 @@ class PrimaryCaps(nn.Module):
     def __init__(
         self,
         in_channels: int,
-        out_channels: int,
+        num_caps: int,
+        caps_dim: int,
         kernel_size: int,
-        capsule_dim: int,
-        stride: int,
     ):
         super(PrimaryCaps, self).__init__()
         self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.capsule_dim = capsule_dim
+        self.num_caps = num_caps
+        self.caps_dim = caps_dim
 
-        # kernel_size == H, W, the final output shape be 1 x 1
-        self.conv2d = nn.Conv2d(
+        self.pc_layer = nn.Conv2d(
             in_channels=in_channels,
-            out_channels=out_channels * capsule_dim,
+            out_channels=num_caps * caps_dim,
             kernel_size=kernel_size,
-            stride=stride,
+            stride=kernel_size,
         )
-        self.squash = Squash()
+        self.act = nn.LayerNorm(caps_dim)
 
     def forward(
         self,
         x: torch.Tensor,
     ):
-        out = self.conv2d(x)
-        B, C, H, W = out.shape
-        out = out.view(B, self.out_channels * H * W, self.capsule_dim)
-        out = self.squash(out)
+        u = self.pc_layer(x)
+        u = u.view(u.shape[0], self.num_caps, self.caps_dim, u.shape[-2], u.shape[-1])
+        u = u.permute(0, 1, 3, 4, 2)
+        u = u.reshape(u.shape[0], -1, self.caps_dim)
+        out = self.act(u)
         return out
 
 
@@ -121,8 +109,8 @@ class PrimaryCaps(nn.Module):
 class RoutingCaps(nn.Module):
     def __init__(
         self,
-        in_capsules: List[int],
-        out_capsules: List[int],
+        in_capsules: List[int] = [16, 8],
+        out_capsules: List[int] = [10, 16],
     ):
         """
         Args:
@@ -159,64 +147,13 @@ class RoutingCaps(nn.Module):
         return S
 
 
-class PG_Caps(nn.Module):
+class MarginalLoss(nn.Module):
     def __init__(
         self,
-        Conv_Cfgs: List[List[List[int]]] = [
-            [
-                [3, 64, 3, 1, 1],
-                [64, 128, 3, 1, 1],
-            ],
-            [
-                [3, 64, 3, 2, 1],
-                [64, 128, 3, 1, 1],
-            ],
-            [
-                [3, 64, 3, 4, 1],
-                [64, 128, 3, 1, 1],
-            ],
-        ],
-        PCaps_Cfgs: List[List[int]] = [
-            [128, 1, 9, 8, 3],
-            [128, 1, 5, 8, 3],
-            [128, 4, 3, 8, 3],
-        ],
-        RCaps_Cfg: List[List[int]] = [[96, 8], [10, 16]],
     ):
-        super(PG_Caps, self).__init__()
-
-        self.Primary_list = nn.ModuleList()
-        for i in range(len(Conv_Cfgs)):
-            convLayer = ConvLayer(
-                Conv_Cfg=Conv_Cfgs[i],
-            )
-            primaryCaps = PrimaryCaps(
-                in_channels=PCaps_Cfgs[i][0],
-                out_channels=PCaps_Cfgs[i][1],
-                kernel_size=PCaps_Cfgs[i][2],
-                capsule_dim=PCaps_Cfgs[i][3],
-                stride=PCaps_Cfgs[i][4],
-            )
-            self.Primary_list.append(nn.Sequential(*[convLayer, primaryCaps]))
-
-        self.routingCaps = RoutingCaps(
-            in_capsules=RCaps_Cfg[0],
-            out_capsules=RCaps_Cfg[1],
-        )
+        super(MarginalLoss, self).__init__()
 
     def forward(
-        self,
-        x: torch.Tensor,
-    ):
-        outs = []
-        for i in range(len(self.Primary_list)):
-            outs.append(self.Primary_list[i](x))
-
-        out = torch.cat(outs, dim=1)
-        out = self.routingCaps(out)
-        return out
-
-    def MarginalLoss(
         self,
         x: torch.Tensor,
         labels: torch.Tensor,
@@ -229,9 +166,9 @@ class PG_Caps(nn.Module):
 
         Args:
             x (torch.Tensor): The output capsule vectors from the final DigitCap layer.
-                              Shape: (batch_size, num_digit_capsules, digit_capsule_dim).
+                            Shape: (batch_size, num_digit_capsules, digit_capsule_dim).
             labels (torch.Tensor): One-hot encoded ground truth labels.
-                                   Shape: (batch_size, num_classes).
+                                Shape: (batch_size, num_classes).
 
         Returns:
             torch.Tensor: The calculated marginal loss (scalar).
@@ -246,9 +183,79 @@ class PG_Caps(nn.Module):
         return margin_loss.mean()
 
 
+class PG_Caps_Cifar10(nn.Module):
+    def __init__(
+        self,
+        Conv_Cfgs: List[List[List[int]]] = [
+            [
+                [3, 64, 5, 1, 2],
+                [64, 128, 3, 1, 1],
+                [128, 128, 3, 1, 1],
+                [128, 256, 3, 1, 1],
+            ],
+            [
+                [3, 64, 5, 2, 2],
+                [64, 128, 3, 1, 1],
+                [128, 128, 3, 1, 1],
+                [128, 256, 3, 1, 1],
+            ],
+            [
+                [3, 64, 5, 4, 2],
+                [64, 128, 3, 1, 1],
+                [128, 128, 3, 1, 1],
+                [128, 256, 3, 1, 1],
+            ],
+        ],
+        PCaps_Cfgs: List[List[int]] = [
+            [256, 4, 16, 4],
+            [256, 4, 16, 4],
+            [256, 4, 16, 4],
+        ],
+        RCaps1_Cfgs: List[List[int]] = [[336, 16], [168, 24]],
+        RCaps2_Cfgs: List[List[int]] = [[168, 24], [10, 32]],
+    ):
+        super(PG_Caps_Cifar10, self).__init__()
+
+        self.Primary_list = nn.ModuleList()
+        for i in range(len(Conv_Cfgs)):
+            convLayer = ConvLayer(
+                Conv_Cfg=Conv_Cfgs[i],
+            )
+            primaryCaps = PrimaryCaps(
+                in_channels=PCaps_Cfgs[i][0],
+                num_caps=PCaps_Cfgs[i][1],
+                caps_dim=PCaps_Cfgs[i][2],
+                kernel_size=PCaps_Cfgs[i][3],
+            )
+            self.Primary_list.append(nn.Sequential(*[convLayer, primaryCaps]))
+
+        self.routingCaps1 = RoutingCaps(
+            in_capsules=RCaps1_Cfgs[0],
+            out_capsules=RCaps1_Cfgs[1],
+        )
+        self.routingCaps2 = RoutingCaps(
+            in_capsules=RCaps2_Cfgs[0],
+            out_capsules=RCaps2_Cfgs[1],
+        )
+
+        self.MarginalLoss = MarginalLoss()
+
+    def forward(
+        self,
+        x: torch.Tensor,
+    ):
+        outs = []
+        for i in range(len(self.Primary_list)):
+            outs.append(self.Primary_list[i](x))
+        out = torch.cat(outs, dim=1)
+        out = self.routingCaps1(out)
+        out = self.routingCaps2(out)
+        return out
+
+
 if __name__ == "__main__":
     x = torch.randn(2, 3, 32, 32)
-    model = PG_Caps()
+    model = PG_Caps_Cifar10()
     with torch.no_grad():
         out = model(x)
         print(out.shape)

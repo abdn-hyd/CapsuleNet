@@ -63,26 +63,42 @@ class LocalMNIST(Dataset):
 
 
 def get_mnist_dataloader(cfg):
-    transform = transforms.Compose(
-        [
-            transforms.ToPILImage(),
-            transforms.RandomRotation(15),
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=cfg.data_mean if cfg.data_mean else [0.5],
-                std=cfg.data_std if cfg.data_std else [0.5],
-            ),
-        ]
-    )
+    if cfg.train:
+        transform = transforms.Compose(
+            [
+                transforms.ToPILImage(),
+                transforms.RandomRotation(15),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=cfg.data_mean if cfg.data_mean else [0.5],
+                    std=cfg.data_std if cfg.data_std else [0.5],
+                ),
+            ]
+        )
+    else:
+        transform = transforms.Compose(
+            [
+                transforms.ToPILImage(),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=cfg.data_mean if cfg.data_mean else [0.5],
+                    std=cfg.data_std if cfg.data_std else [0.5],
+                ),
+            ]
+        )
 
-    dataset = LocalMNIST(root=cfg.mnist_path, train=cfg.train, transform=transform)
+    dataset = LocalMNIST(
+        root=cfg.mnist_path,
+        train=cfg.train,
+        transform=transform,
+    )
 
     dataloader = DataLoader(
         dataset,
         batch_size=cfg.batch_size,
-        shuffle=True,
+        shuffle=cfg.train,
         num_workers=cfg.num_workers,
-        drop_last=True,
+        drop_last=False,
         pin_memory=True,
     )
 
@@ -144,119 +160,43 @@ class LocalCIFAR10(Dataset):
 
 
 def get_cifar10_dataloader(cfg):
-    dataset = LocalCIFAR10(
-        root=cfg.cifar10_path,
-        train=True,
-        transform=transforms.Compose(
+    if cfg.train:
+        transform = transforms.Compose(
             [
                 transforms.ToPILImage(),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 transforms.Normalize(
-                    mean=cfg.data_mean if cfg.data_mean else [0.4914, 0.4822, 0.4465],
+                    mean=(cfg.data_mean if cfg.data_mean else [0.4914, 0.4822, 0.4465]),
                     std=cfg.data_std if cfg.data_std else [0.2023, 0.1994, 0.2010],
                 ),
             ]
-        ),
-    )
+        )
 
-    dataloader = DataLoader(
-        dataset,
-        batch_size=cfg.batch_size,
-        shuffle=True,
-        num_workers=cfg.num_workers,
-        drop_last=True,
-        pin_memory=True,
-    )
-
-    return dataloader
-
-
-class LocalCIFAR100(Dataset):
-    def __init__(
-        self,
-        root: str,
-        train: bool = True,
-        transform: Optional[Callable[[np.ndarray], torch.Tensor]] = None,
-    ):
-        """
-        Args:
-            root (str): path to the root folder (e.g., where 'cifar-100-python' is located)
-            train (bool): using training dataset or not
-            transform (callable): transform function for the images
-        """
-        self.root = root
-        self.transform = transform
-        self.data = []
-        self.labels = []
-
-        # CIFAR-100 typically has 'train' and 'test' files
-        if train:
-            # Adjust this path based on where your CIFAR-100 train file is located
-            # For official CIFAR-100, it's usually inside 'cifar-100-python'
-            files = ["train"]
-        else:
-            files = ["test"]
-
-        for file in files:
-            # Adjust the path to correctly point to the CIFAR-100 data files
-            # Assuming 'root' is the parent directory of 'cifar-100-python'
-            path = os.path.join(root, "cifar-100-python", file)
-            print(f"Loading data from: {path}")  # Add for debugging
-            with open(path, "rb") as f:
-                entry = pickle.load(f, encoding="latin1")
-                self.data.append(entry["data"])
-                self.labels.extend(entry["fine_labels"])  # CIFAR-100 uses 'fine_labels'
-
-        self.data = np.vstack(self.data).reshape(-1, 3, 32, 32)
-        self.data = self.data.transpose(0, 2, 3, 1)  # (N, H, W, C)
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(
-        self,
-        idx: int,
-    ):
-        image = self.data[idx]  # shape (32, 32, 3)
-        label = self.labels[idx]
-
-        if self.transform:
-            image = self.transform(image)
-        else:
-            image = torch.from_numpy(image).permute(2, 0, 1).float()
-            image = (image / 255.0 - 0.5) / 0.5  # [0,1] -> [-1,1]
-
-        label = torch.tensor(label, dtype=torch.long)
-
-        return image, label
-
-
-def get_cifar100_dataloader(cfg):
-    # Make sure cfg.cifar100_path points to the correct root directory
-    dataset = LocalCIFAR100(
-        root=cfg.cifar100_path,
-        train=True,
-        transform=transforms.Compose(
+    else:
+        transform = transforms.Compose(
             [
                 transforms.ToPILImage(),
-                transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 transforms.Normalize(
-                    # Common CIFAR-100 mean and std
-                    mean=cfg.data_mean if cfg.data_mean else [0.5071, 0.4867, 0.4408],
-                    std=cfg.data_std if cfg.data_std else [0.2675, 0.2565, 0.2761],
+                    mean=(cfg.data_mean if cfg.data_mean else [0.4914, 0.4822, 0.4465]),
+                    std=cfg.data_std if cfg.data_std else [0.2023, 0.1994, 0.2010],
                 ),
             ]
-        ),
+        )
+
+    dataset = LocalCIFAR10(
+        root=cfg.cifar10_path,
+        train=cfg.train,
+        transform=transform,
     )
 
     dataloader = DataLoader(
         dataset,
         batch_size=cfg.batch_size,
-        shuffle=True,
+        shuffle=cfg.train,
         num_workers=cfg.num_workers,
-        drop_last=True,
+        drop_last=False,
         pin_memory=True,
     )
 

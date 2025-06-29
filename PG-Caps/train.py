@@ -3,7 +3,8 @@ import torch.nn as nn
 from tqdm import tqdm
 from pathlib import Path
 from Dataset import get_cifar10_dataloader
-from Capsule import PG_Caps
+from PG_Capsule import PG_Caps_Cifar10
+from Pat_Capsule import PatchCaps
 from Config import (
     Cifar10_Train_Loader_Cfg,
     Cifar10_Test_Loader_Cfg,
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def Cifar10_Train():
+def Cifar10_Train(model_name: str = "Pat"):
     # prepare the dataloder
     train_data_Cfg = Cifar10_Train_Loader_Cfg()
     train_loader = get_cifar10_dataloader(train_data_Cfg)
@@ -24,7 +25,10 @@ def Cifar10_Train():
     test_loader = get_cifar10_dataloader(test_data_Cfg)
 
     # load the model config
-    model = PG_Caps().to(DEVICE)
+    if model_name == "Pat":
+        model = PatchCaps().to(DEVICE)
+    else:
+        model = PG_Caps_Cifar10().to(DEVICE)
 
     # setting other hyperparameters
     train_Cfg = Cifar10_Training_Cfg()
@@ -98,7 +102,7 @@ def Train_Test(
             }
             output_dir_path = Path(train_Cfg.output_dir)
             output_dir_path.mkdir(parents=True, exist_ok=True)
-            model_save_path = output_dir_path / f"Mnist_epoch{epoch}.pth"
+            model_save_path = output_dir_path / f"Mnist_epoch{epoch + 1}.pth"
             torch.save(
                 checkpoint,
                 model_save_path,

@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import List
-from torchsummary import summary
 
 
 # class Squash(nn.Module):
@@ -167,14 +166,14 @@ class EfficientCaps(nn.Module):
     def __init__(
         self,
         Conv_Cfg: List[List[int]] = [
-            [3, 32, 5, 1],
+            [1, 32, 5, 1],
             [32, 64, 3, 1],
             [64, 64, 3, 1],
             [64, 128, 3, 2],
         ],
         # config of primary capsule layer
         in_channels: int = 128,
-        kernel_size: int = 11,
+        kernel_size: int = 9,
         num_capsules: int = 16,
         capsule_dim: int = 8,
         stride: int = 1,
@@ -227,10 +226,10 @@ class EfficientCaps(nn.Module):
         Returns:
             torch.Tensor: The calculated marginal loss (scalar).
         """
-        batch_size = x.shape[0]
+        B = x.shape[0]
         v_c = torch.sqrt((x**2).sum(dim=2, keepdim=True))
-        left = F.relu(0.9 - v_c).view(batch_size, -1)
-        right = F.relu(v_c - 0.1).view(batch_size, -1)
+        left = F.relu(0.9 - v_c).view(B, -1)
+        right = F.relu(v_c - 0.1).view(B, -1)
         margin_loss = labels * left + 0.5 * (1.0 - labels) * right
         # we sum the loss for the dim = 1 which is the dimension of classes
         margin_loss = margin_loss.sum(dim=1)
@@ -240,7 +239,6 @@ class EfficientCaps(nn.Module):
 if __name__ == "__main__":
     x = torch.randn(2, 1, 28, 28)
     model = EfficientCaps()
-    # with torch.no_grad():
-    #   out = model(x)
-    #   print(out.shape)
-    summary(model, input_size=(3, 32, 32))
+    with torch.no_grad():
+        out = model(x)
+    print(out.shape)
